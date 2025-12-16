@@ -1,0 +1,5 @@
+
+
+plugins:
+  union_type_lint:
+    path: ../union_type_lint

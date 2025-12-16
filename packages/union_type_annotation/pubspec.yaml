@@ -1,0 +1,7 @@
+name: union_type_annotation
+description: Union type annotation
+version: 1.0.0
+repository: https://github.com/andry-brill/a-union-type/union_type_annotation
+
+environment:
+  sdk: ^3.10.1
