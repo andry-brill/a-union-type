@@ -13,9 +13,9 @@ enum LoggingVariant {
 
 class UnionTypeVisitor extends RecursiveAstVisitor<void> {
 
-  final LoggingVariant verbose;
+  final LoggingVariant logging;
   final file = File('union_type_lint_log.txt');
-  UnionTypeVisitor({this.verbose = LoggingVariant.none});
+  UnionTypeVisitor({this.logging = LoggingVariant.none});
 
   // Map from typedef name to list of allowed type names (from annotation)
   final Map<String, List<String>> unionTypes = {};
@@ -27,6 +27,9 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
   final List<String> violations = [];
   int violationsFound = 0;
 
+  // Track function expressions checked in visitInstanceCreationExpression to avoid duplicates
+  final Set<int> checkedInInstanceCreation = {};
+
   void addUnionType(String typedefName, List<String> allowedTypes) {
     unionTypes[typedefName] = allowedTypes;
   }
@@ -36,8 +39,8 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
   }
 
   void log(String log) {
-    if (verbose == LoggingVariant.print) print('[LOG] $log');
-    if (verbose == LoggingVariant.file) file.writeAsStringSync('$log\n', mode: FileMode.append);
+    if (logging == LoggingVariant.print) print('[LOG] $log');
+    if (logging == LoggingVariant.file) file.writeAsStringSync('$log\n', mode: FileMode.append);
   }
 
   void reportViolation({
@@ -52,7 +55,7 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
 
     violationsFound++;
 
-    if (verbose != LoggingVariant.none) {
+    if (logging != LoggingVariant.none) {
 
       final message = '$target does not match any allowed type in @UnionType $unionTypeName: $allowedTypes. Line $lineNumber.';
       violations.add(message);
@@ -164,8 +167,18 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
       // Check arguments
       for (int i = 0; i < node.argumentList.arguments.length; i++) {
         final arg = node.argumentList.arguments[i];
-        // Get parameter type from function declaration
-        final paramType = _getParameterType(funcDecl, i);
+        String? paramType;
+
+        // Handle named parameters
+        if (arg is NamedExpression) {
+          final paramName = arg.name.label.name;
+          log('visitMethodInvocation: Argument $i is a named parameter "$paramName"');
+          paramType = _getParameterTypeByName(funcDecl, paramName);
+        } else {
+          // Handle positional parameters
+          paramType = _getParameterType(funcDecl, i);
+        }
+
         log('visitMethodInvocation: Parameter $i type string: "$paramType"');
         if (paramType != null) {
           final unionTypeName = _extractUnionTypeName(paramType);
@@ -175,7 +188,21 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
 
             if (arg is FunctionExpression) {
               log('visitMethodInvocation: Argument $i is FunctionExpression, checking signature');
-              _checkFunctionSignature(arg, unionTypeName, arg.offset);
+              // Skip if already checked by visitInstanceCreationExpression
+              if (!checkedInInstanceCreation.contains(arg.offset)) {
+                _checkFunctionSignature(arg, unionTypeName, arg.offset);
+              } else {
+                log('visitMethodInvocation: Already checked by visitInstanceCreationExpression, skipping');
+              }
+            } else if (arg is NamedExpression && arg.expression is FunctionExpression) {
+              log('visitMethodInvocation: Argument $i is NamedExpression with FunctionExpression, checking signature');
+              final funcExpr = arg.expression as FunctionExpression;
+              // Skip if already checked by visitInstanceCreationExpression
+              if (!checkedInInstanceCreation.contains(funcExpr.offset)) {
+                _checkFunctionSignature(funcExpr, unionTypeName, arg.offset);
+              } else {
+                log('visitMethodInvocation: Already checked by visitInstanceCreationExpression, skipping');
+              }
             } else if (arg is InstanceCreationExpression) {
               log('visitMethodInvocation: Argument $i is InstanceCreationExpression, checking class instance');
               _checkClassInstance(arg, unionTypeName, arg.offset);
@@ -294,6 +321,108 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
     return null;
   }
 
+  String? _getParameterTypeByName(AstNode declaration, String paramName) {
+    log('_getParameterTypeByName: Looking for parameter "$paramName"');
+
+    if (declaration is FunctionDeclaration) {
+      final parameters = declaration.functionExpression.parameters?.parameters ?? [];
+      for (final param in parameters) {
+        String? foundParamName;
+        TypeAnnotation? paramType;
+
+        if (param is SimpleFormalParameter) {
+          foundParamName = param.name?.lexeme;
+          paramType = param.type;
+        } else if (param is DefaultFormalParameter) {
+          final innerParam = param.parameter;
+          if (innerParam is SimpleFormalParameter) {
+            foundParamName = innerParam.name?.lexeme;
+            paramType = innerParam.type;
+          }
+        }
+
+        if (foundParamName == paramName && paramType != null) {
+          final typeStr = paramType.toString();
+          if (paramType is NamedType) {
+            return paramType.name.lexeme;
+          }
+          return typeStr;
+        }
+      }
+    } else if (declaration is ConstructorDeclaration) {
+      final parameters = declaration.parameters.parameters;
+      for (final param in parameters) {
+        String? foundParamName;
+        String? paramTypeStr;
+
+        if (param is SimpleFormalParameter) {
+          foundParamName = param.name?.lexeme;
+          if (param.type != null) {
+            final paramType = param.type!;
+            if (paramType is NamedType) {
+              paramTypeStr = paramType.name.lexeme;
+            } else {
+              paramTypeStr = paramType.toString();
+            }
+          }
+        } else if (param is FieldFormalParameter) {
+          foundParamName = param.name.lexeme;
+          if (param.type != null) {
+            final paramType = param.type!;
+            if (paramType is NamedType) {
+              paramTypeStr = paramType.name.lexeme;
+            } else {
+              paramTypeStr = paramType.toString();
+            }
+          } else {
+            // Look up the field type from the class
+            final classDecl = declaration.parent;
+            if (classDecl is ClassDeclaration) {
+              paramTypeStr = _findFieldType(classDecl, foundParamName);
+            }
+          }
+        } else if (param is DefaultFormalParameter) {
+          final innerParam = param.parameter;
+          if (innerParam is SimpleFormalParameter) {
+            foundParamName = innerParam.name?.lexeme;
+            if (innerParam.type != null) {
+              final paramType = innerParam.type!;
+              if (paramType is NamedType) {
+                paramTypeStr = paramType.name.lexeme;
+              } else {
+                paramTypeStr = paramType.toString();
+              }
+            }
+          } else if (innerParam is FieldFormalParameter) {
+            foundParamName = innerParam.name.lexeme;
+            if (innerParam.type != null) {
+              final paramType = innerParam.type!;
+              if (paramType is NamedType) {
+                paramTypeStr = paramType.name.lexeme;
+              } else {
+                paramTypeStr = paramType.toString();
+              }
+            } else {
+              // Look up the field type from the class
+              final classDecl = declaration.parent;
+              if (classDecl is ClassDeclaration) {
+                paramTypeStr = _findFieldType(classDecl, foundParamName);
+              }
+            }
+          }
+        }
+
+        if (foundParamName == paramName) {
+          log('_getParameterTypeByName: Found parameter "$paramName" with type "$paramTypeStr"');
+          return paramTypeStr;
+        }
+      }
+    }
+
+    log('_getParameterTypeByName: Parameter "$paramName" not found');
+    return null;
+  }
+
   String? _findFieldType(ClassDeclaration classDecl, String fieldName) {
     log('_findFieldType: Looking for field "$fieldName" in class "${classDecl.name.lexeme}"');
     for (final member in classDecl.members) {
@@ -346,7 +475,8 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
         final argIndex = parent.arguments.indexOf(node);
         log('visitFunctionExpression: Found in InstanceCreationExpression at argument index $argIndex');
         if (argIndex >= 0) {
-          _checkConstructorArgument(node, grandParent, argIndex, false, node.offset);
+          // Skip - visitInstanceCreationExpression will handle this to avoid duplicate violations
+          log('visitFunctionExpression: Skipping - will be handled by visitInstanceCreationExpression');
         }
       } else if (grandParent is FunctionExpressionInvocation) {
         log('visitFunctionExpression: Found in FunctionExpressionInvocation (skipping - needs element resolution)');
@@ -361,9 +491,8 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
       if (grandParent is ArgumentList) {
         final greatGrandParent = grandParent.parent;
         if (greatGrandParent is InstanceCreationExpression) {
-          final paramName = parent.name.label.name;
-          log('visitFunctionExpression: Found in InstanceCreationExpression with named parameter "$paramName"');
-          _checkConstructorArgument(node, greatGrandParent, -1, true, node.offset, paramName);
+          // Skip - visitInstanceCreationExpression will handle this to avoid duplicate violations
+          log('visitFunctionExpression: Skipping - will be handled by visitInstanceCreationExpression');
         }
       }
     }
@@ -411,20 +540,38 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
           log('_checkConstructorArgument: Looking for named parameter "$paramName"');
           // Find named parameter
           for (final param in parameters) {
-            if (param is DefaultFormalParameter && param.parameter is SimpleFormalParameter) {
-              final simpleParam = param.parameter as SimpleFormalParameter;
-              if (simpleParam.name?.lexeme == paramName) {
-                log('_checkConstructorArgument: Found named parameter "$paramName"');
-                final paramType = simpleParam.type;
+            if (param is DefaultFormalParameter) {
+              final innerParam = param.parameter;
+              String? foundParamName;
+              String? unionTypeName;
+
+              if (innerParam is SimpleFormalParameter) {
+                foundParamName = innerParam.name?.lexeme;
+                final paramType = innerParam.type;
                 log('_checkConstructorArgument: Parameter type: ${paramType?.runtimeType}');
                 if (paramType != null) {
                   final typeStr = paramType.toString();
-                  final unionTypeName = _extractUnionTypeName(typeStr);
-                  log('_checkConstructorArgument: Parameter type name: "$unionTypeName"');
-                  if (unionTypeName != null && isUnionType(unionTypeName)) {
-                    log('_checkConstructorArgument: Parameter type is union type, checking signature');
-                    _checkFunctionSignature(func, unionTypeName, offset);
-                  }
+                  unionTypeName = _extractUnionTypeName(typeStr);
+                }
+              } else if (innerParam is FieldFormalParameter) {
+                // For "this.fieldName" syntax, get type from field declaration
+                foundParamName = innerParam.name.lexeme;
+                log('_checkConstructorArgument: FieldFormalParameter (this.$foundParamName)');
+                final fieldType = _findFieldType(classDecl, foundParamName);
+                if (fieldType != null) {
+                  unionTypeName = _extractUnionTypeName(fieldType);
+                  log('_checkConstructorArgument: Found field type: "$unionTypeName"');
+                } else {
+                  log('_checkConstructorArgument: Could not find field type for "$foundParamName"');
+                }
+              }
+
+              if (foundParamName == paramName) {
+                log('_checkConstructorArgument: Found named parameter "$paramName"');
+                log('_checkConstructorArgument: Parameter type name: "$unionTypeName"');
+                if (unionTypeName != null && isUnionType(unionTypeName)) {
+                  log('_checkConstructorArgument: Parameter type is union type, checking signature');
+                  _checkFunctionSignature(func, unionTypeName, offset);
                 }
                 break;
               }
@@ -536,20 +683,38 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
           log('_checkConstructorClassArgument: Looking for named parameter "$paramName"');
           // Find named parameter
           for (final param in parameters) {
-            if (param is DefaultFormalParameter && param.parameter is SimpleFormalParameter) {
-              final simpleParam = param.parameter as SimpleFormalParameter;
-              if (simpleParam.name?.lexeme == paramName) {
-                log('_checkConstructorClassArgument: Found named parameter "$paramName"');
-                final paramType = simpleParam.type;
+            if (param is DefaultFormalParameter) {
+              final innerParam = param.parameter;
+              String? foundParamName;
+              String? unionTypeName;
+
+              if (innerParam is SimpleFormalParameter) {
+                foundParamName = innerParam.name?.lexeme;
+                final paramType = innerParam.type;
                 log('_checkConstructorClassArgument: Parameter type: ${paramType?.runtimeType}');
                 if (paramType != null) {
                   final typeStr = paramType.toString();
-                  final unionTypeName = _extractUnionTypeName(typeStr);
-                  log('_checkConstructorClassArgument: Parameter type name: "$unionTypeName"');
-                  if (unionTypeName != null && isUnionType(unionTypeName)) {
-                    log('_checkConstructorClassArgument: Parameter type is union type, checking class instance');
-                    _checkClassInstance(instanceArg, unionTypeName, offset);
-                  }
+                  unionTypeName = _extractUnionTypeName(typeStr);
+                }
+              } else if (innerParam is FieldFormalParameter) {
+                // For "this.fieldName" syntax, get type from field declaration
+                foundParamName = innerParam.name.lexeme;
+                log('_checkConstructorClassArgument: FieldFormalParameter (this.$foundParamName)');
+                final fieldType = _findFieldType(classDecl, foundParamName);
+                if (fieldType != null) {
+                  unionTypeName = _extractUnionTypeName(fieldType);
+                  log('_checkConstructorClassArgument: Found field type: "$unionTypeName"');
+                } else {
+                  log('_checkConstructorClassArgument: Could not find field type for "$foundParamName"');
+                }
+              }
+
+              if (foundParamName == paramName) {
+                log('_checkConstructorClassArgument: Found named parameter "$paramName"');
+                log('_checkConstructorClassArgument: Parameter type name: "$unionTypeName"');
+                if (unionTypeName != null && isUnionType(unionTypeName)) {
+                  log('_checkConstructorClassArgument: Parameter type is union type, checking class instance');
+                  _checkClassInstance(instanceArg, unionTypeName, offset);
                 }
                 break;
               }
@@ -667,6 +832,7 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
 
       if (arg is FunctionExpression) {
         log('visitInstanceCreationExpression: Argument $i is a FunctionExpression');
+        checkedInInstanceCreation.add(arg.offset);
         _checkConstructorArgument(
           arg,
           node,
@@ -677,8 +843,10 @@ class UnionTypeVisitor extends RecursiveAstVisitor<void> {
       } else if (arg is NamedExpression && arg.expression is FunctionExpression) {
         log('visitInstanceCreationExpression: Argument $i is a NamedExpression with FunctionExpression');
         final paramName = arg.name.label.name;
+        final funcExpr = arg.expression as FunctionExpression;
+        checkedInInstanceCreation.add(funcExpr.offset);
         _checkConstructorArgument(
-          arg.expression as FunctionExpression,
+          funcExpr,
           node,
           -1,
           true,

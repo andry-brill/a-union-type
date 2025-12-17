@@ -47,3 +47,39 @@ void main() {
   notify(() => print('valid')); // ✅
   notify((double v) => print('invalid')); // ❌
 }
+
+
+abstract class ISurfaceOnTapVoid {
+  void onTap();
+}
+
+typedef SurfaceOnTapVoid = void Function();
+typedef SurfaceOnTapCtx = void Function(BuildContext);
+
+@UnionType([SurfaceOnTapVoid, SurfaceOnTapCtx, ISurfaceOnTapVoid])
+typedef SurfaceOnTap = dynamic;
+
+abstract class ISurface {
+
+  final SurfaceOnTap onTap;
+  const ISurface(this.onTap);
+}
+
+final invalidSurface = USurface(onTap: (int i) {
+}, child: "invalid");
+
+final validSurface = USurface(onTap: () {
+}, child: "valid");
+
+class USurface implements ISurface {
+
+  @override final SurfaceOnTap onTap;
+
+  final Object child;
+  const USurface({required this.child, this.onTap});
+
+  const USurface.decorator({required this.child})
+      : onTap = null;
+
+}
+

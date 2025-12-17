@@ -13,7 +13,8 @@ class UnionTypeRule extends AnalysisRule {
     _UnionTypeRuleVisitor.template,
   );
 
-  UnionTypeRule()
+  final LoggingVariant logging;
+  UnionTypeRule({this.logging = LoggingVariant.none})
       : super(
     name: 'union_type',
     description: 'Validates that values assigned to UnionType typedefs match allowed types.',
@@ -32,10 +33,10 @@ class UnionTypeRule extends AnalysisRule {
 
 class _UnionTypeRuleVisitor extends UnionTypeVisitor {
 
-  final AnalysisRule analysisRule;
+  final UnionTypeRule analysisRule;
   final RuleContext context;
 
-  _UnionTypeRuleVisitor(this.analysisRule, this.context) : super (verbose: LoggingVariant.none);
+  _UnionTypeRuleVisitor(this.analysisRule, this.context) : super (logging: analysisRule.logging);
 
   static const String template = '{0} does not match any allowed type in @UnionType {1}: [{2}].';
 

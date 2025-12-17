@@ -1,13 +1,14 @@
 import 'package:analyzer_testing/analysis_rule/analysis_rule.dart';
 import 'package:test_reflective_loader/test_reflective_loader.dart';
 import 'package:union_type_lint/union_type_rule.dart';
+import 'package:union_type_lint/union_type_visitor.dart';
 
 @reflectiveTest
 class UnionTypeRuleTest extends AnalysisRuleTest {
 
   @override
   void setUp() {
-    rule = UnionTypeRule();
+    rule = UnionTypeRule(logging: LoggingVariant.print);
     super.setUp();
   }
 
@@ -62,11 +63,47 @@ void main() {
   notify(() => print('valid')); // ✅
   notify((double v) => print('invalid')); // ❌
 }
+
+abstract class ISurfaceOnTapVoid {
+  void onTap();
+}
+
+typedef SurfaceOnTapVoid = void Function();
+typedef SurfaceOnTapCtx = void Function(BuildContext);
+
+@UnionType([SurfaceOnTapVoid, SurfaceOnTapCtx, ISurfaceOnTapVoid])
+typedef SurfaceOnTap = dynamic;
+
+abstract class ISurface {
+
+  final SurfaceOnTap onTap;
+  const ISurface(this.onTap);
+}
+
+final invalidSurface = USurface(onTap: (int i) {
+}, child: "invalid");
+
+final validSurface = USurface(onTap: () {
+}, child: "valid");
+
+class USurface implements ISurface {
+
+  @override final SurfaceOnTap onTap;
+
+  final Object child;
+  const USurface({required this.child, this.onTap});
+
+  const USurface.decorator({required this.child})
+      : onTap = null;
+
+}
+
 """,
       [
         lint(848, 31, messageContainsAll: [r'void Function(int) does not match any allowed type in @UnionType OnTap: [VoidCallback, OnTapCtx, OnTapCtxData, IOnTap].']),
         lint(973, 22, messageContainsAll: [r'MyInvalidOnTap does not match any allowed type in @UnionType OnTap: [VoidCallback, OnTapCtx, OnTapCtxData, IOnTap].']),
-        lint(1102, 30, messageContainsAll: [r'void Function(double) does not match any allowed type in @UnionType OnTap: [VoidCallback, OnTapCtx, OnTapCtxData, IOnTap].'])
+        lint(1102, 30, messageContainsAll: [r'void Function(double) does not match any allowed type in @UnionType OnTap: [VoidCallback, OnTapCtx, OnTapCtxData, IOnTap].']),
+        lint(1517, 11, messageContainsAll: [r'void Function(int) does not match any allowed type in @UnionType SurfaceOnTap: [SurfaceOnTapVoid, SurfaceOnTapCtx, ISurfaceOnTapVoid].'])
       ],
     );
   }

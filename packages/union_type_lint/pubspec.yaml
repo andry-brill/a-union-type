@@ -1,6 +1,6 @@
 name: union_type_lint
 description: A Dart analyzer plugin that validates UnionType annotations.
-version: 1.0.1
+version: 1.0.2
 homepage: https://github.com/andry-brill/a-union-type
 repository: https://github.com/andry-brill/a-union-type
 issue_tracker: https://github.com/andry-brill/a-union-type/issues
