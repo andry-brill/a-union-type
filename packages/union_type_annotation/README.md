@@ -1,7 +1,7 @@
 
 ## union_type_annotation
 
-`union_type_annotation` provides a simple annotation class for defining **union types** in Dart.  
+`union_type_annotation` provides a simple annotation class for defining **union types** in Dart.
 This allows you to declare a typedef that can accept multiple types, similar to TypeScript union types, and is intended to be validated by a separate analyzer plugin (`union_type_lint`).
 
 ---
@@ -49,7 +49,7 @@ typedef OnTapCtx = void Function(BuildContext);
 abstract class IOnTap { void onTap(BuildContext context, dynamic data); }
 
 @UnionType([VoidCallback, OnTapCtx, IOnTap])
-typedef OnTap = dynamic;
+typedef OnTap = Object?;  // could be dynamic
 
 class TestClass {
   final OnTap? onTap;

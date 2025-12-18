@@ -57,7 +57,7 @@ typedef OnTapCtx = void Function(BuildContext);
 abstract class IOnTap { void onTap(BuildContext context, dynamic data); }
 
 @UnionType([VoidCallback, OnTapCtx, IOnTap])
-typedef OnTap = dynamic;
+typedef OnTap = Object?; // could be dynamic
 
 class TestClass {
   final OnTap? onTap;

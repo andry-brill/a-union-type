@@ -28,14 +28,14 @@ typedef OnTapCtx = void Function(BuildContext);
 typedef OnTapCtxData = void Function(BuildContext, dynamic);
 
 @UnionType([VoidCallback, OnTapCtx, OnTapCtxData, IOnTap])
-typedef OnTap = dynamic;
+typedef OnTap = Object?;
 
 class TestClass {
   final OnTap? onTap;
   const TestClass(this.onTap);
 }
 
-void notify(OnTap fn) {print('notify: ' + fn);}
+void notify(OnTap fn) {print('notify: $fn');}
 
 final valid = TestClass((BuildContext ctx) => print('valid')); // ✅
 final invalid = TestClass((int value) => print('invalid')); // ❌
@@ -57,7 +57,7 @@ typedef SurfaceOnTapVoid = void Function();
 typedef SurfaceOnTapCtx = void Function(BuildContext);
 
 @UnionType([SurfaceOnTapVoid, SurfaceOnTapCtx, ISurfaceOnTapVoid])
-typedef SurfaceOnTap = dynamic;
+typedef SurfaceOnTap = Object?;
 
 abstract class ISurface {
 
